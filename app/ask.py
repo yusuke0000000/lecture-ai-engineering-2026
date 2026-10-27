@@ -8,6 +8,8 @@
 講座に固有のことを聞くと、「分からない」と答えるか、一般論でもっともらしく答える
 （講座の実際とは違う）ことを確かめよう。
 （第3回で、用語集を検索できるエージェントにして改善する）
+
+温度はコード側で定義した DEFAULT_TEMPERATURE を変更して調整する。
 """
 
 import argparse
@@ -19,6 +21,7 @@ from app.config import MODEL, api_error_message, get_api_key
 
 # 講座に固有の質問。正しい答えは data/glossary.json の homework-levels にある
 DEFAULT_QUESTION = "AIE2026の講座の宿題にある「3レベル」とは何ですか？"
+DEFAULT_TEMPERATURE = 0.7
 
 
 def print_usage_metadata(response: object) -> None:
@@ -42,11 +45,17 @@ def print_usage_metadata(response: object) -> None:
     print(f"[トークン数] 入力: {input_tokens}, 出力: {output_tokens}")
 
 
-def ask(question: str) -> str:
+def ask(question: str, temperature: float | None = None) -> str:
+    if temperature is None:
+        temperature = DEFAULT_TEMPERATURE
     client = genai.Client(api_key=get_api_key())
-    response = client.models.generate_content(model=MODEL, contents=question)
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=question,
+        config={"temperature": temperature},
+    )
     print_usage_metadata(response)
-    return response.text
+    return response.text or "テキスト形式の回答がありませんでした。"
 
 
 def main() -> None:
@@ -58,6 +67,7 @@ def main() -> None:
     args = parser.parse_args()
 
     print(f"[model] {MODEL}")
+    print(f"[temperature] {DEFAULT_TEMPERATURE}")
     print(f"[質問] {args.question}\n")
     try:
         if args.once:
@@ -69,16 +79,20 @@ def main() -> None:
         question = args.question
 
         while True:
-            response = chat.send_message(question)
-            print(response.text)
+            response = chat.send_message(
+                question,
+                config={"temperature": DEFAULT_TEMPERATURE},
+            )
+            print(response.text or "テキスト形式の回答がありませんでした。")
             print_usage_metadata(response)
 
             while True:
                 try:
                     next_question = input(
-                        "\n続けて質問してください（終了: exit / quit）> "
+                        "\n続けて質問してください（終了: exit）> "
                     ).strip()
-                except EOFError:
+                except (EOFError, KeyboardInterrupt):
+                    print("\n終了します。")
                     return
 
                 if next_question.lower() in {"exit", "quit", "/exit", "/quit"}:
