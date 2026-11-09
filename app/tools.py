@@ -7,6 +7,7 @@
 import json
 from functools import cache
 from pathlib import Path
+import random
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 MAX_RESULTS = 3
@@ -77,3 +78,67 @@ def get_lecture_summary(lecture: int) -> str:
         available = sorted(p.stem for p in (DATA_DIR / "lectures").glob("*.md"))
         return f"第{lecture}回の要点はまだありません。用意されている回: {', '.join(available)}"
     return path.read_text(encoding="utf-8")
+
+
+def make_quiz(lecture: int) -> str:
+    """指定した講義回の用語からランダムに１つ選び、
+    復習問題を生成する。
+    
+    ユーザーから「第⚪︎回の復習問題を出して」などと、
+    依頼された時に使う
+    """
+
+    glossary = load_glossary()
+
+    terms = [
+        item for item in glossary
+        if item["lecture"] == lecture
+    ]
+
+    if not terms:
+        return json.dumps(
+            {"error": f"第{lecture}回の用語はまだありません。"},
+            ensure_ascii=False
+        )
+
+    selected = random.choice(terms)
+
+    result = {
+        "question": f"{selected['term']}とは何ですか?",
+        "answer": selected["definition"]
+    }
+
+    return json.dumps(result, ensure_ascii=False)
+
+
+def save_learning_log(lecture: int, content: str) -> str:
+    """指定した講義回の学習記録を保存する。
+
+    ユーザーが学習内容の保存を依頼したときに使用する。
+    保存にはユーザーの承認が必要。
+    """
+    if lecture < 1:
+        return "講義回は1以上を指定してください。"
+
+    if not content.strip():
+        return "保存する学習内容が空です。"
+
+    # プロジェクト直下の learning_log/ を指定
+    log_dir = Path(__file__).resolve().parent.parent / "learning_log"
+
+    # フォルダがなければ作成
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    # 講義回ごとの保存先
+    log_path = log_dir / f"lecture_{lecture:02d}.jsonl"
+
+    record = {
+        "lecture": lecture,
+        "content": content,
+    }
+
+    # JSON Lines形式で追記
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    return f"第{lecture}回の学習記録を保存しました。"
