@@ -10,13 +10,13 @@
 モデルは tools.py の関数を「ツール」として呼び出し、その結果を見て回答を作る。
 第5回では、同じツールを MCP サーバー（app/mcp_server.py）経由で受け取る。
 """
-
+# - 用語や講座に固有のことを答える前に、必ず search_glossary で用語集を確認する。
 import argparse
 import inspect
 import json
 from pathlib import Path
 
-from pydantic_ai import Agent
+from pydantic_ai import Agent, DeferredToolRequests,  DeferredToolResults
 from pydantic_ai.exceptions import ModelHTTPError
 from fastmcp import Client
 from pydantic_ai.mcp import MCPToolset, StdioTransport
@@ -38,11 +38,19 @@ INSTRUCTIONS = """\
 """
 
 # モデルは実行時に渡す（テストではAPIを呼ばない TestModel に差し替えるため）
-agent = Agent(instructions=INSTRUCTIONS)
+agent = Agent(
+    instructions=INSTRUCTIONS,
+    output_type=[str, DeferredToolRequests],
+)
 agent.tool_plain(tools.search_glossary)
 agent.tool_plain(tools.get_lecture_summary)
 
 # TODO(第3回 演習): tools.py に make_quiz を作り、ここで登録しよう
+agent.tool_plain(tools.make_quiz)
+agent.tool_plain(
+    tools.save_learning_log,
+    requires_approval=True,
+)
 
 # 第5回: 使う MCP サーバーの設定ファイル。Claude Desktop や Cursor と同じ "mcpServers" 形式
 MCP_CONFIG = Path(__file__).resolve().parent / "mcp_servers.json"
@@ -129,6 +137,26 @@ def main() -> None:
         print("[tools] MCP サーバー（app/mcp_servers.json）")
     try:
         result = target.run_sync(args.question, model=build_model())
+        # 承認待ちのツールがある場合
+        while isinstance(result.output, DeferredToolRequests):
+            approvals = DeferredToolResults()
+
+            for call in result.output.approvals:
+                print(f"\nツール: {call.tool_name}")
+                print(f"引数: {call.args}")
+
+                answer = input("実行を承認しますか？ (y/n): ")
+
+                approvals.approvals[call.tool_call_id] = (
+                    answer.strip().lower() == "y"
+                )
+
+            # 承認結果を渡してエージェントを再開
+            result = target.run_sync(
+                message_history=result.all_messages(),
+                deferred_tool_results=approvals,
+                model=build_model(),
+            )
     except ModelHTTPError as e:
         print(api_error_message(e.status_code, str(e.body)[:200]))
         raise SystemExit(1)
